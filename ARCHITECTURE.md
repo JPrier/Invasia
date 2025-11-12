@@ -132,7 +132,7 @@ impl Simulation {
 2. Astro serves pre-rendered HTML
 3. Static HTML displays immediately
 4. JavaScript bundles load
-5. Svelte hydrates Counter component
+5. Svelte hydrates SimulationTable component
 ```
 
 ### Component Hydration
