@@ -9,10 +9,9 @@ The site is automatically deployed to GitHub Pages at: https://jprier.github.io/
 ## ✨ Features
 
 - **Hello World Landing Page** - Beautiful, responsive design with gradient background
-- **Rust + WebAssembly Backend** - All counter logic and memory management handled by Rust compiled to WASM
+- **Rust + WebAssembly Backend** - High-performance logic and memory management with Rust compiled to WASM
 - **AI Decision Scoring System** - Advanced strategic AI for country-based simulation games
 - **Svelte + TypeScript Frontend** - Reactive UI components with type safety for DOM manipulation
-- **Interactive Counter** - Demonstrates seamless integration between Svelte UI and Rust/WASM logic
 - **Static Site Generation** - Fast loading times with pre-rendered HTML
 - **Automated Deployment** - GitHub Actions workflow for continuous deployment to GitHub Pages
 
@@ -88,7 +87,7 @@ npm run preview
 npm run test:wasm
 
 # Or directly with cargo
-cd wasm-counter && cargo test
+cd wasm && cargo test
 ```
 
 ## 📦 Project Structure
@@ -99,16 +98,17 @@ cd wasm-counter && cargo test
 │   └── favicon.svg          # Site favicon
 ├── src/
 │   ├── components/
-│   │   └── Counter.svelte   # Svelte counter component (TypeScript)
+│   │   └── SimulationTable.svelte  # Svelte simulation component (TypeScript)
 │   ├── pages/
-│   │   └── index.astro      # Main page
+│   │   ├── index.astro      # Main page
+│   │   └── simulation.astro # Simulation page
 │   └── wasm/                # Generated WASM files (excluded from git)
-│       ├── wasm_counter.js
-│       ├── wasm_counter_bg.wasm
+│       ├── wasm.js
+│       ├── wasm_bg.wasm
 │       └── ...
-├── wasm-counter/            # Rust/WASM source
+├── wasm/                    # Rust/WASM source
 │   ├── src/
-│   │   ├── lib.rs           # Counter logic in Rust
+│   │   ├── lib.rs           # WASM entry point and simulation logic
 │   │   └── decision_scoring/ # AI Decision Scoring System
 │   │       ├── mod.rs       # Module definitions
 │   │       ├── luts.rs      # Lookup tables (sigmoid, log-ratio, etc.)
@@ -131,18 +131,18 @@ cd wasm-counter && cargo test
 
 ### Data Flow
 
-1. **Rust/WASM Module** (`wasm-counter/src/lib.rs`)
-   - Implements `Counter` struct with increment/decrement/reset logic
+1. **Rust/WASM Module** (`wasm/src/lib.rs`)
+   - Implements AI simulation and decision scoring systems
    - Compiled to WebAssembly for near-native performance
    - Manages memory safely using Rust's ownership system
 
-2. **Svelte Component** (`src/components/Counter.svelte`)
+2. **Svelte Component** (`src/components/SimulationTable.svelte`)
    - Loads WASM module asynchronously on mount
    - Manages UI state reactively with TypeScript
    - Calls Rust functions through WASM bindings
    - Updates DOM efficiently with Svelte's reactivity
 
-3. **Astro Page** (`src/pages/index.astro`)
+3. **Astro Page** (`src/pages/simulation.astro`)
    - Server-renders the page structure
    - Hydrates Svelte component on the client
    - Provides optimal loading performance
