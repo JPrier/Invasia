@@ -39,6 +39,24 @@ impl From<u32> for AiState {
     }
 }
 
+/// Purchase type enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[wasm_bindgen]
+pub enum PurchaseType {
+    Military = 0,       // Buy military strength
+    Health = 1,         // Buy healing/repairs
+    Territory = 2,      // Buy/trade territory
+    MaxHealth = 3,      // Increase max health capacity
+    Gift = 4,          // Give resources as a gift
+}
+
+/// Purchase result for validation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PurchaseResult {
+    pub success: bool,
+    pub message: String,
+}
+
 /// AI entity with scalar attributes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiEntity {
@@ -50,6 +68,7 @@ pub struct AiEntity {
     pub state: AiState,
     pub territory: f32,  // Territory controlled by this entity
     pub money: f32,      // Money/resources owned by this entity
+    pub max_health: f32, // Maximum health capacity
 }
 
 impl AiEntity {
@@ -92,6 +111,7 @@ impl AiEntity {
             state: initial_state,
             territory: 10.0,  // Start with small territory
             money: initial_money,
+            max_health: 100.0, // Default max health
         }
     }
 
@@ -186,8 +206,8 @@ impl AiEntity {
         }
 
         // Health regeneration with variation (slower than before, and not during combat)
-        if self.health < 100.0 && total_damage == 0.0 {
-            self.health = (self.health + 0.05 * variation).min(100.0);
+        if self.health < self.max_health && total_damage == 0.0 {
+            self.health = (self.health + 0.05 * variation).min(self.max_health);
         }
     }
 }
@@ -460,6 +480,45 @@ impl Simulation {
         serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL)
     }
 
+    /// Purchase military strength
+    /// Cost: 10 money per unit of military strength
+    #[wasm_bindgen]
+    pub fn purchase_military(&mut self, entity_id: u32, amount: f32) -> JsValue {
+        let result = self.purchase_military_internal(entity_id, amount);
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
+    /// Purchase healing (restore health)
+    /// Cost: 5 money per unit of health
+    #[wasm_bindgen]
+    pub fn purchase_healing(&mut self, entity_id: u32, amount: f32) -> JsValue {
+        let result = self.purchase_healing_internal(entity_id, amount);
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
+    /// Increase max health capacity
+    /// Cost: 20 money per unit of max health increase
+    #[wasm_bindgen]
+    pub fn purchase_max_health(&mut self, entity_id: u32, amount: f32) -> JsValue {
+        let result = self.purchase_max_health_internal(entity_id, amount);
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
+    /// Trade territory between entities
+    /// Cost: 15 money per unit of territory
+    #[wasm_bindgen]
+    pub fn trade_territory(&mut self, from_id: u32, to_id: u32, amount: f32) -> JsValue {
+        let result = self.trade_territory_internal(from_id, to_id, amount);
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
+    /// Give resources as a gift (money, military, or territory)
+    #[wasm_bindgen]
+    pub fn give_gift(&mut self, from_id: u32, to_id: u32, money: f32, military: f32, territory: f32) -> JsValue {
+        let result = self.give_gift_internal(from_id, to_id, money, military, territory);
+        serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    }
+
     /// Destroy the simulation (cleanup)
     #[wasm_bindgen]
     pub fn destroy(&mut self) {
@@ -467,6 +526,281 @@ impl Simulation {
         self.entities.clear();
         self.tick = 0;
         self.grid.clear();
+    }
+}
+
+// Internal implementation (non-wasm) for testing and internal use
+impl Simulation {
+    /// Internal method to purchase military strength
+    fn purchase_military_internal(&mut self, entity_id: u32, amount: f32) -> PurchaseResult {
+        let cost = amount * 10.0;
+        if let Some(entity) = self.entities.iter_mut().find(|e| e.id == entity_id) {
+            if entity.state == AiState::Dead {
+                PurchaseResult {
+                    success: false,
+                    message: "Dead entities cannot make purchases".to_string(),
+                }
+            } else if entity.money < cost {
+                PurchaseResult {
+                    success: false,
+                    message: format!("Insufficient funds. Need {:.2}, have {:.2}", cost, entity.money),
+                }
+            } else if amount <= 0.0 {
+                PurchaseResult {
+                    success: false,
+                    message: "Amount must be positive".to_string(),
+                }
+            } else {
+                entity.money -= cost;
+                entity.military_strength = (entity.military_strength + amount).min(200.0);
+                PurchaseResult {
+                    success: true,
+                    message: format!("Purchased {:.2} military strength for {:.2} money", amount, cost),
+                }
+            }
+        } else {
+            PurchaseResult {
+                success: false,
+                message: "Entity not found".to_string(),
+            }
+        }
+    }
+
+    /// Internal method to purchase healing
+    fn purchase_healing_internal(&mut self, entity_id: u32, amount: f32) -> PurchaseResult {
+        let cost = amount * 5.0;
+        if let Some(entity) = self.entities.iter_mut().find(|e| e.id == entity_id) {
+            if entity.state == AiState::Dead {
+                PurchaseResult {
+                    success: false,
+                    message: "Dead entities cannot make purchases".to_string(),
+                }
+            } else if entity.money < cost {
+                PurchaseResult {
+                    success: false,
+                    message: format!("Insufficient funds. Need {:.2}, have {:.2}", cost, entity.money),
+                }
+            } else if amount <= 0.0 {
+                PurchaseResult {
+                    success: false,
+                    message: "Amount must be positive".to_string(),
+                }
+            } else {
+                entity.money -= cost;
+                entity.health = (entity.health + amount).min(entity.max_health);
+                PurchaseResult {
+                    success: true,
+                    message: format!("Purchased {:.2} health for {:.2} money", amount, cost),
+                }
+            }
+        } else {
+            PurchaseResult {
+                success: false,
+                message: "Entity not found".to_string(),
+            }
+        }
+    }
+
+    /// Internal method to increase max health
+    fn purchase_max_health_internal(&mut self, entity_id: u32, amount: f32) -> PurchaseResult {
+        let cost = amount * 20.0;
+        if let Some(entity) = self.entities.iter_mut().find(|e| e.id == entity_id) {
+            if entity.state == AiState::Dead {
+                PurchaseResult {
+                    success: false,
+                    message: "Dead entities cannot make purchases".to_string(),
+                }
+            } else if entity.money < cost {
+                PurchaseResult {
+                    success: false,
+                    message: format!("Insufficient funds. Need {:.2}, have {:.2}", cost, entity.money),
+                }
+            } else if amount <= 0.0 {
+                PurchaseResult {
+                    success: false,
+                    message: "Amount must be positive".to_string(),
+                }
+            } else {
+                entity.money -= cost;
+                entity.max_health = (entity.max_health + amount).min(300.0);
+                PurchaseResult {
+                    success: true,
+                    message: format!("Increased max health by {:.2} for {:.2} money", amount, cost),
+                }
+            }
+        } else {
+            PurchaseResult {
+                success: false,
+                message: "Entity not found".to_string(),
+            }
+        }
+    }
+
+    /// Internal method to trade territory
+    fn trade_territory_internal(&mut self, from_id: u32, to_id: u32, amount: f32) -> PurchaseResult {
+        let cost = amount * 15.0;
+        
+        // Validate both entities exist
+        let from_exists = self.entities.iter().any(|e| e.id == from_id);
+        let to_exists = self.entities.iter().any(|e| e.id == to_id);
+        
+        if !from_exists {
+            return PurchaseResult {
+                success: false,
+                message: "Source entity not found".to_string(),
+            };
+        }
+        
+        if !to_exists {
+            return PurchaseResult {
+                success: false,
+                message: "Target entity not found".to_string(),
+            };
+        }
+        
+        // Get info about from_entity for validation
+        let (from_money, from_territory, from_dead) = {
+            let from_entity = self.entities.iter().find(|e| e.id == from_id).unwrap();
+            (from_entity.money, from_entity.territory, from_entity.state == AiState::Dead)
+        };
+        
+        let to_dead = self.entities.iter().find(|e| e.id == to_id).unwrap().state == AiState::Dead;
+        
+        if from_dead {
+            PurchaseResult {
+                success: false,
+                message: "Dead entities cannot make purchases".to_string(),
+            }
+        } else if to_dead {
+            PurchaseResult {
+                success: false,
+                message: "Cannot trade with dead entities".to_string(),
+            }
+        } else if from_money < cost {
+            PurchaseResult {
+                success: false,
+                message: format!("Insufficient funds. Need {:.2}, have {:.2}", cost, from_money),
+            }
+        } else if amount <= 0.0 {
+            PurchaseResult {
+                success: false,
+                message: "Amount must be positive".to_string(),
+            }
+        } else if from_territory < amount {
+            PurchaseResult {
+                success: false,
+                message: format!("Insufficient territory. Need {:.2}, have {:.2}", amount, from_territory),
+            }
+        } else {
+            // Execute the trade
+            for entity in &mut self.entities {
+                if entity.id == from_id {
+                    entity.money -= cost;
+                    entity.territory = (entity.territory - amount).max(0.0);
+                } else if entity.id == to_id {
+                    entity.territory = (entity.territory + amount).min(100.0);
+                }
+            }
+            PurchaseResult {
+                success: true,
+                message: format!("Traded {:.2} territory for {:.2} money", amount, cost),
+            }
+        }
+    }
+
+    /// Internal method to give gift
+    fn give_gift_internal(&mut self, from_id: u32, to_id: u32, money: f32, military: f32, territory: f32) -> PurchaseResult {
+        // Validate both entities exist
+        let from_exists = self.entities.iter().any(|e| e.id == from_id);
+        let to_exists = self.entities.iter().any(|e| e.id == to_id);
+        
+        if !from_exists {
+            return PurchaseResult {
+                success: false,
+                message: "Source entity not found".to_string(),
+            };
+        }
+        
+        if !to_exists {
+            return PurchaseResult {
+                success: false,
+                message: "Target entity not found".to_string(),
+            };
+        }
+        
+        // Get info about from_entity for validation
+        let (from_money, from_military, from_territory, from_dead) = {
+            let from_entity = self.entities.iter().find(|e| e.id == from_id).unwrap();
+            (from_entity.money, from_entity.military_strength, from_entity.territory, from_entity.state == AiState::Dead)
+        };
+        
+        let to_dead = self.entities.iter().find(|e| e.id == to_id).unwrap().state == AiState::Dead;
+        
+        if from_dead {
+            PurchaseResult {
+                success: false,
+                message: "Dead entities cannot give gifts".to_string(),
+            }
+        } else if to_dead {
+            PurchaseResult {
+                success: false,
+                message: "Cannot give gifts to dead entities".to_string(),
+            }
+        } else if money < 0.0 || military < 0.0 || territory < 0.0 {
+            PurchaseResult {
+                success: false,
+                message: "Gift amounts cannot be negative".to_string(),
+            }
+        } else if from_money < money {
+            PurchaseResult {
+                success: false,
+                message: format!("Insufficient money. Need {:.2}, have {:.2}", money, from_money),
+            }
+        } else if from_military < military {
+            PurchaseResult {
+                success: false,
+                message: format!("Insufficient military. Need {:.2}, have {:.2}", military, from_military),
+            }
+        } else if from_territory < territory {
+            PurchaseResult {
+                success: false,
+                message: format!("Insufficient territory. Need {:.2}, have {:.2}", territory, from_territory),
+            }
+        } else if money == 0.0 && military == 0.0 && territory == 0.0 {
+            PurchaseResult {
+                success: false,
+                message: "Gift must contain at least one resource".to_string(),
+            }
+        } else {
+            // Execute the gift
+            for entity in &mut self.entities {
+                if entity.id == from_id {
+                    entity.money -= money;
+                    entity.military_strength -= military;
+                    entity.territory -= territory;
+                } else if entity.id == to_id {
+                    entity.money += money;
+                    entity.military_strength = (entity.military_strength + military).min(200.0);
+                    entity.territory = (entity.territory + territory).min(100.0);
+                }
+            }
+            
+            let mut parts = Vec::new();
+            if money > 0.0 {
+                parts.push(format!("{:.2} money", money));
+            }
+            if military > 0.0 {
+                parts.push(format!("{:.2} military", military));
+            }
+            if territory > 0.0 {
+                parts.push(format!("{:.2} territory", territory));
+            }
+            
+            PurchaseResult {
+                success: true,
+                message: format!("Gave gift: {}", parts.join(", ")),
+            }
+        }
     }
 }
 
@@ -862,5 +1196,188 @@ mod tests {
         let entity2_money_gain = sim.entities[2].money - entity2_initial_money;
         assert!(entity2_military_gain < 50.0, "Entity 2 should not receive significant military strength");
         assert!(entity2_money_gain < 50.0, "Entity 2 should not receive significant money");
+    }
+
+    #[test]
+    fn test_purchase_military() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entity with money
+        sim.entities[0].money = 100.0;
+        let initial_military = sim.entities[0].military_strength;
+        
+        // Purchase military strength
+        let result = sim.purchase_military_internal(0, 5.0);
+        
+        assert!(result.success, "Purchase should succeed");
+        assert_eq!(sim.entities[0].money, 50.0, "Money should be deducted (5 * 10 = 50)");
+        assert_eq!(sim.entities[0].military_strength, initial_military + 5.0, "Military strength should increase");
+    }
+
+    #[test]
+    fn test_purchase_military_insufficient_funds() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entity with insufficient money
+        sim.entities[0].money = 10.0;
+        
+        // Try to purchase military strength
+        let result = sim.purchase_military_internal(0, 5.0);
+        
+        assert!(!result.success, "Purchase should fail due to insufficient funds");
+        assert_eq!(sim.entities[0].money, 10.0, "Money should not be deducted");
+    }
+
+    #[test]
+    fn test_purchase_healing() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entity with damage and money
+        sim.entities[0].money = 100.0;
+        sim.entities[0].health = 50.0;
+        
+        // Purchase healing
+        let result = sim.purchase_healing_internal(0, 10.0);
+        
+        assert!(result.success, "Purchase should succeed");
+        assert_eq!(sim.entities[0].money, 50.0, "Money should be deducted (10 * 5 = 50)");
+        assert_eq!(sim.entities[0].health, 60.0, "Health should increase");
+    }
+
+    #[test]
+    fn test_purchase_healing_respects_max_health() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entity with high health and money
+        sim.entities[0].money = 100.0;
+        sim.entities[0].health = 95.0;
+        sim.entities[0].max_health = 100.0;
+        
+        // Purchase healing that would exceed max
+        let result = sim.purchase_healing_internal(0, 10.0);
+        
+        assert!(result.success, "Purchase should succeed");
+        assert_eq!(sim.entities[0].health, 100.0, "Health should be capped at max_health");
+    }
+
+    #[test]
+    fn test_purchase_max_health() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entity with money
+        sim.entities[0].money = 100.0;
+        sim.entities[0].max_health = 100.0;
+        
+        // Purchase max health increase
+        let result = sim.purchase_max_health_internal(0, 5.0);
+        
+        assert!(result.success, "Purchase should succeed");
+        assert_eq!(sim.entities[0].money, 0.0, "Money should be deducted (5 * 20 = 100)");
+        assert_eq!(sim.entities[0].max_health, 105.0, "Max health should increase");
+    }
+
+    #[test]
+    fn test_trade_territory() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entities
+        sim.entities[0].money = 150.0;
+        sim.entities[0].territory = 50.0;
+        sim.entities[1].territory = 20.0;
+        
+        // Trade territory
+        let result = sim.trade_territory_internal(0, 1, 10.0);
+        
+        assert!(result.success, "Trade should succeed");
+        assert_eq!(sim.entities[0].money, 0.0, "Money should be deducted (10 * 15 = 150)");
+        assert_eq!(sim.entities[0].territory, 40.0, "Territory should decrease");
+        assert_eq!(sim.entities[1].territory, 30.0, "Territory should increase");
+    }
+
+    #[test]
+    fn test_trade_territory_insufficient_territory() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entities
+        sim.entities[0].money = 150.0;
+        sim.entities[0].territory = 5.0;
+        
+        // Try to trade more territory than available
+        let result = sim.trade_territory_internal(0, 1, 10.0);
+        
+        assert!(!result.success, "Trade should fail due to insufficient territory");
+        assert_eq!(sim.entities[0].territory, 5.0, "Territory should not change");
+    }
+
+    #[test]
+    fn test_give_gift() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entities
+        sim.entities[0].money = 100.0;
+        sim.entities[0].military_strength = 80.0;
+        sim.entities[0].territory = 50.0;
+        sim.entities[1].money = 50.0;
+        sim.entities[1].military_strength = 60.0;
+        sim.entities[1].territory = 20.0;
+        
+        // Give gift
+        let result = sim.give_gift_internal(0, 1, 20.0, 10.0, 5.0);
+        
+        assert!(result.success, "Gift should succeed");
+        assert_eq!(sim.entities[0].money, 80.0, "Money should be transferred");
+        assert_eq!(sim.entities[0].military_strength, 70.0, "Military should be transferred");
+        assert_eq!(sim.entities[0].territory, 45.0, "Territory should be transferred");
+        assert_eq!(sim.entities[1].money, 70.0, "Money should be received");
+        assert_eq!(sim.entities[1].military_strength, 70.0, "Military should be received");
+        assert_eq!(sim.entities[1].territory, 25.0, "Territory should be received");
+    }
+
+    #[test]
+    fn test_give_gift_insufficient_resources() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entities
+        sim.entities[0].money = 10.0;
+        
+        // Try to give more money than available
+        let result = sim.give_gift_internal(0, 1, 20.0, 0.0, 0.0);
+        
+        assert!(!result.success, "Gift should fail due to insufficient money");
+    }
+
+    #[test]
+    fn test_dead_entity_cannot_purchase() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up dead entity
+        sim.entities[0].state = AiState::Dead;
+        sim.entities[0].money = 100.0;
+        
+        // Try to purchase military
+        let result = sim.purchase_military_internal(0, 5.0);
+        
+        assert!(!result.success, "Dead entities should not be able to purchase");
+    }
+
+    #[test]
+    fn test_cannot_trade_with_dead_entity() {
+        let mut sim = Simulation::new(2);
+        
+        // Set up entities
+        sim.entities[0].money = 150.0;
+        sim.entities[0].territory = 50.0;
+        sim.entities[1].state = AiState::Dead;
+        
+        // Try to trade with dead entity
+        let result = sim.trade_territory_internal(0, 1, 10.0);
+        
+        assert!(!result.success, "Cannot trade with dead entities");
+    }
+
+    #[test]
+    fn test_entity_has_max_health_field() {
+        let entity = AiEntity::new(0);
+        assert_eq!(entity.max_health, 100.0, "New entities should have max_health of 100");
     }
 }
