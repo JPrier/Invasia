@@ -11,6 +11,13 @@
     state: number | string;
     territory: number;
     money: number;
+    max_health: number;
+  }
+
+  // Purchase result type
+  interface PurchaseResult {
+    success: boolean;
+    message: string;
   }
 
   // State names for display
@@ -41,6 +48,19 @@
   // Update loop
   let updateInterval: number | null = null;
   let renderInterval: number | null = null;
+
+  // Purchase modal state
+  let showPurchaseModal: boolean = false;
+  let selectedEntityId: number | null = null;
+  let selectedEntity: AiEntity | null = null;
+  let purchaseType: string = 'military';
+  let purchaseAmount: number = 10;
+  let targetEntityId: number | null = null;
+  let giftMoney: number = 0;
+  let giftMilitary: number = 0;
+  let giftTerritory: number = 0;
+  let purchaseMessage: string = '';
+  let purchaseSuccess: boolean = false;
 
   // Load the WASM module on component mount
   onMount(async () => {
@@ -168,6 +188,80 @@
   function formatNumber(num: number): string {
     return num.toFixed(2);
   }
+
+  function openPurchaseModal(entity: AiEntity): void {
+    selectedEntityId = entity.id;
+    selectedEntity = entity;
+    showPurchaseModal = true;
+    purchaseMessage = '';
+    purchaseAmount = 10;
+    targetEntityId = null;
+    giftMoney = 0;
+    giftMilitary = 0;
+    giftTerritory = 0;
+  }
+
+  function closePurchaseModal(): void {
+    showPurchaseModal = false;
+    selectedEntityId = null;
+    selectedEntity = null;
+    purchaseMessage = '';
+  }
+
+  function executePurchase(): void {
+    if (!simulation || !wasmLoaded || selectedEntityId === null) return;
+    
+    let result: PurchaseResult;
+    
+    try {
+      switch (purchaseType) {
+        case 'military':
+          result = simulation.purchase_military(selectedEntityId, purchaseAmount);
+          break;
+        case 'healing':
+          result = simulation.purchase_healing(selectedEntityId, purchaseAmount);
+          break;
+        case 'maxHealth':
+          result = simulation.purchase_max_health(selectedEntityId, purchaseAmount);
+          break;
+        case 'territory':
+          if (targetEntityId === null) {
+            purchaseMessage = 'Please select a target entity for territory trade';
+            purchaseSuccess = false;
+            return;
+          }
+          result = simulation.trade_territory(selectedEntityId, targetEntityId, purchaseAmount);
+          break;
+        case 'gift':
+          if (targetEntityId === null) {
+            purchaseMessage = 'Please select a target entity for gift';
+            purchaseSuccess = false;
+            return;
+          }
+          result = simulation.give_gift(selectedEntityId, targetEntityId, giftMoney, giftMilitary, giftTerritory);
+          break;
+        default:
+          purchaseMessage = 'Unknown purchase type';
+          purchaseSuccess = false;
+          return;
+      }
+      
+      purchaseSuccess = result.success;
+      purchaseMessage = result.message;
+      
+      if (result.success) {
+        updateSnapshot();
+        // Close modal after successful purchase
+        setTimeout(() => {
+          closePurchaseModal();
+        }, 1500);
+      }
+    } catch (e) {
+      console.error('Purchase error:', e);
+      purchaseMessage = 'Error executing purchase';
+      purchaseSuccess = false;
+    }
+  }
 </script>
 
 <div class="simulation-container">
@@ -286,6 +380,7 @@
           <th>Position X</th>
           <th>Position Y</th>
           <th>State</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -323,11 +418,103 @@
                 {getStateName(entity.state)}
               </span>
             </td>
+            <td class="actions-cell">
+              <button 
+                class="btn-action" 
+                on:click={() => openPurchaseModal(entity)}
+                disabled={entity.state === 4}
+                aria-label="Purchase options for entity {entity.id}"
+              >
+                💰 Purchase
+              </button>
+            </td>
           </tr>
         {/each}
       </tbody>
     </table>
   </div>
+
+  {#if showPurchaseModal && selectedEntity}
+    <div class="modal-overlay" on:click={closePurchaseModal}>
+      <div class="modal-content" on:click|stopPropagation>
+        <h3>Purchase Options - Entity #{selectedEntity.id}</h3>
+        
+        <div class="entity-info">
+          <p><strong>Money:</strong> {formatNumber(selectedEntity.money)}</p>
+          <p><strong>Health:</strong> {formatNumber(selectedEntity.health)} / {formatNumber(selectedEntity.max_health)}</p>
+          <p><strong>Military:</strong> {formatNumber(selectedEntity.military_strength)}</p>
+          <p><strong>Territory:</strong> {formatNumber(selectedEntity.territory)}</p>
+        </div>
+
+        <div class="purchase-form">
+          <label>
+            <strong>Purchase Type:</strong>
+            <select bind:value={purchaseType}>
+              <option value="military">Military Strength (Cost: 10 per unit)</option>
+              <option value="healing">Healing/Repairs (Cost: 5 per unit)</option>
+              <option value="maxHealth">Increase Max Health (Cost: 20 per unit)</option>
+              <option value="territory">Trade Territory (Cost: 15 per unit)</option>
+              <option value="gift">Give Gift (Free)</option>
+            </select>
+          </label>
+
+          {#if purchaseType !== 'gift'}
+            <label>
+              <strong>Amount:</strong>
+              <input type="number" bind:value={purchaseAmount} min="1" max="100" step="1" />
+            </label>
+          {/if}
+
+          {#if purchaseType === 'territory' || purchaseType === 'gift'}
+            <label>
+              <strong>Target Entity ID:</strong>
+              <input type="number" bind:value={targetEntityId} min="0" max={entityCount - 1} step="1" />
+            </label>
+          {/if}
+
+          {#if purchaseType === 'gift'}
+            <label>
+              <strong>Money to Give:</strong>
+              <input type="number" bind:value={giftMoney} min="0" max={selectedEntity.money} step="1" />
+            </label>
+            <label>
+              <strong>Military to Give:</strong>
+              <input type="number" bind:value={giftMilitary} min="0" max={selectedEntity.military_strength} step="1" />
+            </label>
+            <label>
+              <strong>Territory to Give:</strong>
+              <input type="number" bind:value={giftTerritory} min="0" max={selectedEntity.territory} step="1" />
+            </label>
+          {/if}
+
+          {#if purchaseType === 'military'}
+            <p class="cost-info">Cost: {formatNumber(purchaseAmount * 10)} money</p>
+          {:else if purchaseType === 'healing'}
+            <p class="cost-info">Cost: {formatNumber(purchaseAmount * 5)} money</p>
+          {:else if purchaseType === 'maxHealth'}
+            <p class="cost-info">Cost: {formatNumber(purchaseAmount * 20)} money</p>
+          {:else if purchaseType === 'territory'}
+            <p class="cost-info">Cost: {formatNumber(purchaseAmount * 15)} money</p>
+          {/if}
+
+          {#if purchaseMessage}
+            <div class="purchase-message {purchaseSuccess ? 'success' : 'error'}">
+              {purchaseMessage}
+            </div>
+          {/if}
+
+          <div class="modal-actions">
+            <button class="btn btn-primary" on:click={executePurchase}>
+              {purchaseType === 'gift' ? 'Give Gift' : 'Purchase'}
+            </button>
+            <button class="btn btn-danger" on:click={closePurchaseModal}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -603,6 +790,130 @@
     color: #991b1b;
   }
 
+  .actions-cell {
+    text-align: center;
+  }
+
+  .btn-action {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: white;
+    background: #667eea;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-action:hover:not(:disabled) {
+    background: #5568d3;
+  }
+
+  .btn-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-content {
+    background: white;
+    border-radius: 0.5rem;
+    padding: 2rem;
+    max-width: 500px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .modal-content h3 {
+    margin: 0 0 1rem 0;
+    color: #333;
+  }
+
+  .entity-info {
+    background: #f5f5f5;
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .entity-info p {
+    margin: 0.25rem 0;
+    font-size: 0.875rem;
+  }
+
+  .purchase-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .purchase-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  .purchase-form input,
+  .purchase-form select {
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  .cost-info {
+    background: #fef3c7;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #92400e;
+    margin: 0;
+  }
+
+  .purchase-message {
+    padding: 0.75rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .purchase-message.success {
+    background: #d1fae5;
+    color: #065f46;
+  }
+
+  .purchase-message.error {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .modal-actions button {
+    flex: 1;
+  }
+
   @media (max-width: 768px) {
     .button-group {
       flex-direction: column;
@@ -619,6 +930,11 @@
 
     .table-container {
       max-height: 400px;
+    }
+
+    .modal-content {
+      width: 95%;
+      padding: 1rem;
     }
   }
 </style>
